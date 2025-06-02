@@ -6,10 +6,6 @@
 
 
 
-#![feature(type_alias_impl_trait)]
-
-
-
 mod buffer;
 mod controller;
 mod task;
