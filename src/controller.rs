@@ -86,7 +86,7 @@ impl Controller {
         unsafe { BUFFERS[self.current as usize].flush() };
 
         // Swap the buffers.
-        self.current.swap();
+        self.current = self.current.swap();
     }
 
     /// Writes to the current buffer.
@@ -112,7 +112,7 @@ impl Controller {
         }
 
         // Check the other buffer.
-        self.current.swap();
+        self.swap();
 
         // Get the alternate buffer.
         let alternate = unsafe { &mut BUFFERS[self.current as usize] };
