@@ -1,8 +1,8 @@
 //! Logger buffers and the buffer controller
 
+#![allow(dead_code, clippy::needless_return)]
 
 use super::buffer::LogBuffer;
-
 
 /// The buffer controller of the logger.
 #[link_section = ".data.defmtusb.CONTROLLER"]
@@ -11,8 +11,6 @@ pub(super) static mut CONTROLLER: Controller = Controller::new();
 /// The swappable buffers that store the data to be sent.
 #[link_section = ".bss.defmtusb.BUFFERS"]
 pub(super) static mut BUFFERS: [LogBuffer; 2] = [LogBuffer::new(), LogBuffer::new()];
-
-
 
 /// Controller of the buffers of the logger.
 pub struct Controller {
@@ -57,7 +55,7 @@ impl Controller {
     /// Returns `true` if the current buffer can accept the given number of bytes.
     #[inline]
     pub(super) fn accepts(&self, n: usize) -> bool {
-        unsafe{ BUFFERS[self.current as usize].accepts(n) }
+        unsafe { BUFFERS[self.current as usize].accepts(n) }
     }
 
     /// Clears the ready flag.
@@ -80,7 +78,9 @@ impl Controller {
     /// Swaps the buffer index.
     pub(super) fn swap(&mut self) {
         // Do nothing if not enabled.
-        if !self.enabled { return; }
+        if !self.enabled {
+            return;
+        }
 
         // Mark the current buffer as flushing.
         unsafe { BUFFERS[self.current as usize].flush() };
@@ -93,15 +93,17 @@ impl Controller {
     #[inline]
     pub(super) fn write(&mut self, bytes: &[u8]) {
         // Do nothing if not enabled.
-        if !self.enabled { return; }
+        if !self.enabled {
+            return;
+        }
 
         // Get the current buffer.
         let current = unsafe { &mut BUFFERS[self.current as usize] };
 
         // If the current buffer accepts the necessary bytes, write to it.
-        if current.accepts( bytes.len() ) {
+        if current.accepts(bytes.len()) {
             // Write to the buffer the data.
-            current.write( bytes );
+            current.write(bytes);
 
             return;
         }
@@ -118,16 +120,14 @@ impl Controller {
         let alternate = unsafe { &mut BUFFERS[self.current as usize] };
 
         // If the alternate buffer accepts the necessary bytes, write to it.
-        if alternate.accepts( bytes.len() ) {
+        if alternate.accepts(bytes.len()) {
             // Write to the buffer the data.
-            alternate.write( bytes );
+            alternate.write(bytes);
 
             return;
         }
     }
 }
-
-
 
 /// The index of the currently active buffer.
 #[repr(usize)]

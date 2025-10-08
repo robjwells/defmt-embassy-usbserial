@@ -1,6 +1,5 @@
 //! Buffer of the `defmt` logger.
-
-
+#![allow(clippy::needless_range_loop)]
 
 /// The size of the buffer.
 #[cfg(feature = "buffersize-64")]
@@ -17,8 +16,6 @@ const BUFFERSIZE: usize = 512;
 
 #[cfg(feature = "buffersize-1024")]
 const BUFFERSIZE: usize = 1024;
-
-
 
 pub(super) struct LogBuffer {
     /// Current state of the buffer.
@@ -56,7 +53,9 @@ impl LogBuffer {
     /// Writes to the buffer.
     pub(super) fn write(&mut self, bytes: &[u8]) {
         // If not active, return immediately.
-        if self.flushing() { return; }
+        if self.flushing() {
+            return;
+        }
 
         // Get the minimum size.
         let n = core::cmp::min(BUFFERSIZE - self.cursor, bytes.len());
@@ -93,8 +92,6 @@ impl LogBuffer {
         self.state == BufferState::Flush
     }
 }
-
-
 
 /// The current state of the buffer.
 #[derive(Clone, Copy, Eq, PartialEq)]

@@ -1,24 +1,20 @@
 //! Main task that runs the USB transport layer.
 
-
-
-#![allow(unused_labels)]
-
-
+#![allow(
+    unused_labels,
+    unused_mut,
+    clippy::unnecessary_cast,
+    clippy::single_match,
+    clippy::collapsible_match
+)]
 
 use embassy_usb::{
-    Config,
-
-    class::cdc_acm::{
-        Sender, State,
-    },
-
+    class::cdc_acm::{Sender, State},
     driver::Driver,
+    Config,
 };
 
 use static_cell::StaticCell;
-
-
 
 /// Statically allocated device descriptor buffer.
 #[link_section = ".bss.defmtusb.DESCRIPTORS"]
@@ -39,8 +35,6 @@ static mut CONTROL: [u8; 256] = [0u8; 256];
 /// Statically allocated CDC ACM state.
 static STATE: StaticCell<State> = StaticCell::new();
 
-
-
 /// Builds the USB class and runs both the logger and USB.
 /// Requires the USB driver provided by the HAL and the maximum packet size
 /// allowed in the device.
@@ -48,11 +42,7 @@ static STATE: StaticCell<State> = StaticCell::new();
 /// other information of the USB device. If none is provided a default
 /// configuration will be set.
 pub async fn run<D: Driver<'static>>(driver: D, size: usize, config: Option<Config<'static>>) {
-    use embassy_usb::{
-        Builder,
-    
-        class::cdc_acm::CdcAcmClass,
-    };
+    use embassy_usb::{class::cdc_acm::CdcAcmClass, Builder};
 
     // Create the configuration.
     let mut config = match config {
@@ -73,32 +63,21 @@ pub async fn run<D: Driver<'static>>(driver: D, size: usize, config: Option<Conf
             cfg.max_packet_size_0 = size as u8;
 
             cfg
-        },
+        }
 
         // User provided configuration.
         Some(c) => c,
     };
 
     // Get the static buffers.
-    let (devdesc, cfgdesc, bosdesc, ctrlbuf) = unsafe {(
-        &mut DEVBUF,
-        &mut CFGBUF,
-        &mut BOSBUF,
-        &mut CONTROL,
-    )};
+    let (devdesc, cfgdesc, bosdesc, ctrlbuf) =
+        unsafe { (&mut DEVBUF, &mut CFGBUF, &mut BOSBUF, &mut CONTROL) };
 
     // Create the state of the CDC ACM device.
-    let state: &'static mut State<'static> = STATE.init( State::new() );
+    let state: &'static mut State<'static> = STATE.init(State::new());
 
     // Create the USB builder.
-    let mut builder = Builder::new(
-        driver,
-        config,
-        devdesc,
-        cfgdesc,
-        bosdesc,
-        ctrlbuf,
-    );
+    let mut builder = Builder::new(driver, config, devdesc, cfgdesc, bosdesc, ctrlbuf);
 
     // Create the class on top of the builder.
     let class = CdcAcmClass::new(&mut builder, state, size as u16);
@@ -113,23 +92,19 @@ pub async fn run<D: Driver<'static>>(driver: D, size: usize, config: Option<Conf
     embassy_futures::join::join(usb.run(), logger(sender, size as usize)).await;
 }
 
-
-
 /// Runs the logger task.
 pub async fn logger<'d, D: Driver<'d>>(mut sender: Sender<'d, D>, size: usize) {
-    use embassy_time::{
-        Timer, Duration,
-    };
+    use embassy_time::{Duration, Timer};
 
     use embassy_usb::driver::EndpointError;
-    
+
     // Get a reference to the controller.
     let controller = unsafe { &mut super::controller::CONTROLLER };
 
     // Get a reference to the buffers.
     let buffers = unsafe { &mut super::controller::BUFFERS };
 
-    'main : loop {
+    'main: loop {
         // Wait for the device to be connected.
         sender.wait_connection().await;
 
@@ -137,17 +112,20 @@ pub async fn logger<'d, D: Driver<'d>>(mut sender: Sender<'d, D>, size: usize) {
         controller.enable();
 
         // Begin sending the data.
-        'data : loop {
-
+        'data: loop {
             // Wait for new data.
-            let buffer = 'select : loop {
+            let buffer = 'select: loop {
                 // Check which buffer is flushing.
-                if buffers[0].flushing() { break 'select &mut buffers[0]; }
-                if buffers[1].flushing() { break 'select &mut buffers[1]; }
+                if buffers[0].flushing() {
+                    break 'select &mut buffers[0];
+                }
+                if buffers[1].flushing() {
+                    break 'select &mut buffers[1];
+                }
 
                 // Wait the timeout.
                 // TODO : Make this configurable.
-                Timer::after( Duration::from_millis(100) ).await;
+                Timer::after(Duration::from_millis(100)).await;
             };
 
             // Get an iterator over the data of the buffer.
@@ -165,7 +143,7 @@ pub async fn logger<'d, D: Driver<'d>>(mut sender: Sender<'d, D>, size: usize) {
                             controller.disable();
 
                             continue 'main;
-                        },
+                        }
 
                         _ => (),
                     },
