@@ -79,11 +79,6 @@ pub async fn run<D: Driver<'static>>(driver: D, size: usize, config: Option<Conf
         Some(c) => c,
     };
 
-    // Configure the device class.
-    config.device_class = 0x02;
-    config.device_sub_class = 0x02;
-    config.device_protocol = 0x01;
-
     // Get the static buffers.
     let (devdesc, cfgdesc, bosdesc, ctrlbuf) = unsafe {(
         &mut DEVBUF,
