@@ -1,7 +1,5 @@
 //! Main task that runs the USB transport layer.
 
-#![allow(unused_labels, unused_mut, clippy::unnecessary_cast)]
-
 use embassy_usb::{
     class::cdc_acm::{Sender, State},
     driver::Driver,
@@ -35,7 +33,7 @@ pub async fn run<D: Driver<'static>>(driver: D, size: usize, config: Option<Conf
     use embassy_usb::{class::cdc_acm::CdcAcmClass, Builder};
 
     // Create the configuration.
-    let mut config = match config {
+    let config = match config {
         // Set default configuration.
         None => {
             // Create the configuration.
@@ -82,10 +80,11 @@ pub async fn run<D: Driver<'static>>(driver: D, size: usize, config: Option<Conf
     let (sender, _) = class.split();
 
     // Run both futures concurrently.
-    embassy_futures::join::join(usb.run(), logger(sender, size as usize)).await;
+    embassy_futures::join::join(usb.run(), logger(sender, size)).await;
 }
 
 /// Runs the logger task.
+#[allow(unused_labels)]
 pub async fn logger<'d, D: Driver<'d>>(mut sender: Sender<'d, D>, size: usize) {
     use embassy_time::{Duration, Timer};
 
