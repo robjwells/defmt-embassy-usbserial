@@ -1,12 +1,6 @@
 //! Main task that runs the USB transport layer.
 
-#![allow(
-    unused_labels,
-    unused_mut,
-    clippy::unnecessary_cast,
-    clippy::single_match,
-    clippy::collapsible_match
-)]
+#![allow(unused_labels, unused_mut, clippy::unnecessary_cast)]
 
 use embassy_usb::{
     class::cdc_acm::{Sender, State},
@@ -126,22 +120,14 @@ pub async fn logger<'d, D: Driver<'d>>(mut sender: Sender<'d, D>, size: usize) {
 
             for chunk in chunks {
                 // Send the data.
-                match sender.write_packet(chunk).await {
-                    Err(e) => match e {
-                        // The endpoint was disconnected.
-                        EndpointError::Disabled => {
-                            // Reset the buffer as its contents' integrity is gone.
+                if let Err(EndpointError::Disabled) = sender.write_packet(chunk).await {
+                    // Reset the buffer as its contents' integrity is gone.
+                    // TODO: Why was there no actual reset of the buffer?
 
-                            // Disable the controller.
-                            controller.disable();
+                    // Disable the controller.
+                    controller.disable();
 
-                            continue 'main;
-                        }
-
-                        _ => (),
-                    },
-
-                    _ => (),
+                    continue 'main;
                 }
             }
 
