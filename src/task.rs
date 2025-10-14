@@ -29,33 +29,8 @@ static STATE: StaticCell<State> = StaticCell::new();
 /// The user may provide an optional USB configuration to set the VID, PID and
 /// other information of the USB device. If none is provided a default
 /// configuration will be set.
-pub async fn run<D: Driver<'static>>(driver: D, size: usize, config: Option<Config<'static>>) {
+pub async fn run<D: Driver<'static>>(driver: D, size: usize, config: Config<'static>) {
     use embassy_usb::{class::cdc_acm::CdcAcmClass, Builder};
-
-    // Create the configuration.
-    let config = match config {
-        // Set default configuration.
-        None => {
-            // Create the configuration.
-            let mut cfg = Config::new(0xDEF7, 0xDA7A);
-
-            // Set information strings.
-            cfg.manufacturer = Some("micro-rust organization");
-            cfg.product = Some("USB defmt logger");
-            cfg.serial_number = Some("314159");
-
-            // Configure the default max power.
-            cfg.max_power = 100;
-
-            // Configure the max packet size.
-            cfg.max_packet_size_0 = size as u8;
-
-            cfg
-        }
-
-        // User provided configuration.
-        Some(c) => c,
-    };
 
     // Create the state of the CDC ACM device.
     let state: &'static mut State<'static> = STATE.init(State::new());
