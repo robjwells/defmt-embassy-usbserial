@@ -1,6 +1,7 @@
 //! Main task that runs the USB transport layer.
 
 #![allow(
+    static_mut_refs,
     unused_labels,
     unused_mut,
     clippy::unnecessary_cast,
