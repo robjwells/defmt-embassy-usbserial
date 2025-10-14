@@ -1,7 +1,6 @@
 //! Main task that runs the USB transport layer.
 
 #![allow(
-    static_mut_refs,
     unused_labels,
     unused_mut,
     clippy::unnecessary_cast,
@@ -15,25 +14,21 @@ use embassy_usb::{
     Config,
 };
 
-use static_cell::StaticCell;
+use static_cell::{ConstStaticCell, StaticCell};
 
-/// Statically allocated device descriptor buffer.
-#[link_section = ".bss.defmtusb.DESCRIPTORS"]
-static mut DEVBUF: [u8; 256] = [0u8; 256];
+/// Config descriptor buffer
+static CONFIG_DESCRIPTOR_BUF: ConstStaticCell<[u8; 256]> = ConstStaticCell::new([0u8; 256]);
 
-/// Statically allocated configuration descriptor buffer.
-#[link_section = ".bss.defmtusb.DESCRIPTORS"]
-static mut CFGBUF: [u8; 256] = [0u8; 256];
+/// BOS descriptor buffer
+static BOS_DESCRIPTOR_BUF: ConstStaticCell<[u8; 256]> = ConstStaticCell::new([0u8; 256]);
 
-/// Statically allocated BOS descriptor buffer.
-#[link_section = ".bss.defmtusb.DESCRIPTORS"]
-static mut BOSBUF: [u8; 256] = [0u8; 256];
+/// MSOS descriptor buffer
+static MSOS_DESCRIPTOR_BUF: ConstStaticCell<[u8; 256]> = ConstStaticCell::new([0u8; 256]);
 
-/// Statically allocated control buffer.
-#[link_section = ".bss.defmtusb.DESCRIPTORS"]
-static mut CONTROL: [u8; 256] = [0u8; 256];
+/// Control buffer
+static CONTROL_BUF: ConstStaticCell<[u8; 256]> = ConstStaticCell::new([0u8; 256]);
 
-/// Statically allocated CDC ACM state.
+/// CDC ACM state.
 static STATE: StaticCell<State> = StaticCell::new();
 
 /// Builds the USB class and runs both the logger and USB.
@@ -70,15 +65,18 @@ pub async fn run<D: Driver<'static>>(driver: D, size: usize, config: Option<Conf
         Some(c) => c,
     };
 
-    // Get the static buffers.
-    let (devdesc, cfgdesc, bosdesc, ctrlbuf) =
-        unsafe { (&mut DEVBUF, &mut CFGBUF, &mut BOSBUF, &mut CONTROL) };
-
     // Create the state of the CDC ACM device.
     let state: &'static mut State<'static> = STATE.init(State::new());
 
     // Create the USB builder.
-    let mut builder = Builder::new(driver, config, devdesc, cfgdesc, bosdesc, ctrlbuf);
+    let mut builder = Builder::new(
+        driver,
+        config,
+        CONFIG_DESCRIPTOR_BUF.take(),
+        BOS_DESCRIPTOR_BUF.take(),
+        MSOS_DESCRIPTOR_BUF.take(),
+        CONTROL_BUF.take(),
+    );
 
     // Create the class on top of the builder.
     let class = CdcAcmClass::new(&mut builder, state, size as u16);
@@ -100,9 +98,11 @@ pub async fn logger<'d, D: Driver<'d>>(mut sender: Sender<'d, D>, size: usize) {
     use embassy_usb::driver::EndpointError;
 
     // Get a reference to the controller.
+    #[allow(static_mut_refs)]
     let controller = unsafe { &mut super::controller::CONTROLLER };
 
     // Get a reference to the buffers.
+    #[allow(static_mut_refs)]
     let buffers = unsafe { &mut super::controller::BUFFERS };
 
     'main: loop {
