@@ -53,7 +53,7 @@ impl LogBuffer {
     /// Writes to the buffer.
     pub(super) fn write(&mut self, bytes: &[u8]) {
         // If not active, return immediately.
-        if self.flushing() {
+        if self.is_flushing() {
             return;
         }
 
@@ -88,7 +88,7 @@ impl LogBuffer {
 
     /// Returns `true` if the buffer is being flushed.
     #[inline]
-    pub(super) fn flushing(&self) -> bool {
+    pub(super) fn is_flushing(&self) -> bool {
         self.state == BufferState::Flush
     }
 }

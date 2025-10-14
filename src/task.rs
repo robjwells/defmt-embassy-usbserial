@@ -101,10 +101,6 @@ pub async fn logger<'d, D: Driver<'d>>(mut sender: Sender<'d, D>, size: usize) {
     #[allow(static_mut_refs)]
     let controller = unsafe { &mut super::controller::CONTROLLER };
 
-    // Get a reference to the buffers.
-    #[allow(static_mut_refs)]
-    let buffers = unsafe { &mut super::controller::BUFFERS };
-
     'main: loop {
         // Wait for the device to be connected.
         sender.wait_connection().await;
@@ -116,14 +112,10 @@ pub async fn logger<'d, D: Driver<'d>>(mut sender: Sender<'d, D>, size: usize) {
         'data: loop {
             // Wait for new data.
             let buffer = 'select: loop {
-                // Check which buffer is flushing.
-                if buffers[0].flushing() {
-                    break 'select &mut buffers[0];
+                // Get a flushing buffer
+                if let Some(buf) = controller.get_flushing() {
+                    break buf;
                 }
-                if buffers[1].flushing() {
-                    break 'select &mut buffers[1];
-                }
-
                 // Wait the timeout.
                 // TODO : Make this configurable.
                 Timer::after(Duration::from_millis(100)).await;
