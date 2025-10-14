@@ -1,5 +1,4 @@
 //! Buffer of the `defmt` logger.
-#![allow(clippy::needless_range_loop)]
 
 /// The size of the buffer.
 #[cfg(feature = "buffersize-64")]
@@ -58,12 +57,12 @@ impl LogBuffer {
         }
 
         // Get the minimum size.
+        // TODO: if bytes.len() > remaining buffer, some bytes won't be written.
+        // This should at least be reported to the caller.
         let n = core::cmp::min(BUFFERSIZE - self.cursor, bytes.len());
 
         // Write the bytes.
-        for i in 0..n {
-            self.data[self.cursor + i] = bytes[i];
-        }
+        self.data[self.cursor..self.cursor + n].copy_from_slice(&bytes[0..n]);
 
         // Increment the cursor.
         self.cursor += n;
