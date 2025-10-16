@@ -68,6 +68,9 @@ impl LogBuffer {
         self.cursor += n;
 
         // If limit reached, set as flush.
+        //
+        // TODO: Is this necessary? Why -2? Is it to avoid the max-packet-size transfer
+        // needing a shorter transfer afterwards?
         if self.cursor >= (BUFFERSIZE - 2) {
             self.state = BufferState::Flush;
         }
