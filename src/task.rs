@@ -80,8 +80,17 @@ pub async fn logger<'d, D: Driver<'d>>(mut sender: Sender<'d, D>) {
         loop {
             let flush_res = controller
                 .flush::<_, EndpointError>(async |bytes| {
+                    let mut was_max_size = false;
                     for chunk in bytes.chunks(packet_size) {
+                        was_max_size = chunk.len() == packet_size;
                         sender.write_packet(chunk).await?;
+                    }
+                    // The Embassy CDC ACM docs note that a transfer must be terminated with a
+                    // shorter packet, so we track the size of the last chunk sent, and send a
+                    // zero-length packet if the chunk was the maximum packet size to ensure it is
+                    // processed by the host.
+                    if was_max_size {
+                        sender.write_packet(&[]).await?;
                     }
                     Ok(())
                 })
