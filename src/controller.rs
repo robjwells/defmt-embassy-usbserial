@@ -50,13 +50,24 @@ impl Controller {
     }
 
     /// Disables the controller.
+    ///
+    /// A disabled controller silently ignores any defmt logging.
+    ///
+    /// The internal buffers are reset when the controller is disabled to prevent any
+    /// partial frames being transmitted when the controller is re-enabled.
     #[inline]
     pub(super) fn disable(&self) {
         self.enabled.store(false, Ordering::Relaxed);
-        // TODO: It might make sense to ensure both buffers are reset when the
-        // controller is disabled, so that there are no partial defmt frames
-        // hanging around that will be transmitted when the controller is
-        // next enabled.
+        let first = self.buffers[0].get();
+        let second = self.buffers[1].get();
+        critical_section::with(|_| {
+            // SAFETY: We are in a critical section, and this function is only called on
+            // EndpointError::Disabled when flushing a buffer. It cannot disturb any ongoing defmt
+            // writes because they take their own critical section, and the controller is already
+            // marked as disabled so any new defmt writes (or flushes) will be ignored.
+            unsafe { &mut *first }.reset();
+            unsafe { &mut *second }.reset();
+        });
     }
 
     /// Mark the current buffer as flushing and set the other to be active.
@@ -125,6 +136,11 @@ impl Controller {
         }
     }
 
+    /// Get a buffer that needs to be flushed to USB.
+    ///
+    /// Should _both_ buffers need flushing, it will flush the one at index 0 first.
+    ///
+    /// This is a purely a convenience for use in `flush`.
     fn get_flushing(&self) -> Option<(usize, &LogBuffer)> {
         for (idx, cell) in self.buffers.iter().enumerate() {
             // SAFETY: swap, used in the defmt critical section, only ever marks a buffer as
@@ -138,13 +154,16 @@ impl Controller {
         None
     }
 
+    /// Return a buffer to service after it has been flushed.
+    ///
+    /// This mutates the buffer state, and is only to be used inside the controller.
     fn reset_buffer(&self, buf_idx: usize) {
         // We use a critical section here to ensure that the buffer is never in a state where it
-        // has not fully reset itself when .
+        // has not fully reset itself.
+        let cell = self.buffers[buf_idx].get();
         critical_section::with(|_| {
             // SAFETY: We are in a critical section.
-            let buf = unsafe { &mut *self.buffers[buf_idx].get() };
-            buf.reset()
+            unsafe { &mut *cell }.reset();
         });
     }
 
