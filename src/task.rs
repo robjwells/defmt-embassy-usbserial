@@ -55,18 +55,19 @@ pub async fn run<D: Driver<'static>>(driver: D, size: usize, config: Config<'sta
     let (sender, _) = class.split();
 
     // Run both futures concurrently.
-    embassy_futures::join::join(usb.run(), logger(sender, size)).await;
+    embassy_futures::join::join(usb.run(), logger(sender)).await;
 }
 
 /// Runs the logger task.
-#[allow(unused_labels)]
-pub async fn logger<'d, D: Driver<'d>>(mut sender: Sender<'d, D>, size: usize) {
+pub async fn logger<'d, D: Driver<'d>>(mut sender: Sender<'d, D>) {
     use embassy_time::{Duration, Timer};
 
     use embassy_usb::driver::EndpointError;
 
     // Get a reference to the controller.
     let controller = &super::controller::CONTROLLER;
+    // Only attempt to write what the sender will accept.
+    let packet_size = sender.max_packet_size() as usize;
 
     'main: loop {
         // Wait for the device to be connected.
@@ -75,37 +76,33 @@ pub async fn logger<'d, D: Driver<'d>>(mut sender: Sender<'d, D>, size: usize) {
         // Set the controller as enabled.
         controller.enable();
 
-        // Begin sending the data.
-        'data: loop {
-            // Wait for new data.
-            let (buf_idx, buffer) = 'select: loop {
-                // Get a flushing buffer
-                if let Some(pair) = controller.get_flushing() {
-                    break pair;
-                }
-                // Wait the timeout.
-                // TODO : Make this configurable.
-                Timer::after(Duration::from_millis(100)).await;
-            };
+        // Continually attempt to write buffered defmt bytes out over USB.
+        loop {
+            let flush_res = controller
+                .flush::<_, EndpointError>(async |bytes| {
+                    for chunk in bytes.chunks(packet_size) {
+                        sender.write_packet(chunk).await?;
+                    }
+                    Ok(())
+                })
+                .await;
 
-            // Get an iterator over the data of the buffer.
-            let chunks = buffer.data[..buffer.cursor].chunks(size);
-
-            for chunk in chunks {
-                // Send the data.
-                if let Err(EndpointError::Disabled) = sender.write_packet(chunk).await {
-                    // Reset the buffer as its contents' integrity is gone.
-                    // TODO: Why was there no actual reset of the buffer?
-
-                    // Disable the controller.
+            match flush_res {
+                Err(EndpointError::Disabled) => {
+                    // USB endpoint is now disabled, so disable the controller (and so
+                    // not accept any defmt log messages) and wait until reconnected.
                     controller.disable();
-
                     continue 'main;
                 }
-            }
+                Err(EndpointError::BufferOverflow) => {
+                    unreachable!("Sent chunks are limited to Sender max packet size.")
+                }
+                Ok(()) => (),
+            };
 
-            // Reset the buffer as it has been transmitted.
-            controller.reset_buffer(buf_idx);
+            // Wait the timeout.
+            // TODO: Make this configurable.
+            Timer::after(Duration::from_millis(100)).await;
         }
     }
 }

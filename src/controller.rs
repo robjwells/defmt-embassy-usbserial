@@ -53,6 +53,10 @@ impl Controller {
     #[inline]
     pub(super) fn disable(&self) {
         self.enabled.store(false, Ordering::Relaxed);
+        // TODO: It might make sense to ensure both buffers are reset when the
+        // controller is disabled, so that there are no partial defmt frames
+        // hanging around that will be transmitted when the controller is
+        // next enabled.
     }
 
     /// Mark the current buffer as flushing and set the other to be active.
@@ -121,7 +125,7 @@ impl Controller {
         }
     }
 
-    pub(super) fn get_flushing(&self) -> Option<(usize, &LogBuffer)> {
+    fn get_flushing(&self) -> Option<(usize, &LogBuffer)> {
         for (idx, cell) in self.buffers.iter().enumerate() {
             // SAFETY: swap, used in the defmt critical section, only ever marks a buffer as
             // flushing (*never* as active), so if a buffer is marked as flushing it will not
@@ -134,11 +138,32 @@ impl Controller {
         None
     }
 
-    pub(crate) fn reset_buffer(&self, buf_idx: usize) {
-        // SAFETY: ????
-        unsafe {
-            let buf = &mut *self.buffers[buf_idx].get();
-            buf.reset();
-        };
+    fn reset_buffer(&self, buf_idx: usize) {
+        // We use a critical section here to ensure that the buffer is never in a state where it
+        // has not fully reset itself when .
+        critical_section::with(|_| {
+            // SAFETY: We are in a critical section.
+            let buf = unsafe { &mut *self.buffers[buf_idx].get() };
+            buf.reset()
+        });
+    }
+
+    pub(crate) async fn flush<F, E>(&self, mut flusher: F) -> Result<(), E>
+    where
+        F: AsyncFnMut(&[u8]) -> Result<(), E>,
+    {
+        if let Some((buf_idx, buffer)) = self.get_flushing() {
+            // Only provide the used portion of the buffer.
+            let bytes = &buffer.data[..buffer.cursor];
+            let res = flusher(bytes).await;
+            // Always reset the buffer: this is the desired action in case of success,
+            // and unavoidable in case of error, because we cannot know how much of
+            // the buffer was sent.
+            self.reset_buffer(buf_idx);
+            // Propagate any error to the caller.
+            res?;
+        }
+        // Nothing to flush, or flush completed without issue.
+        Ok(())
     }
 }
