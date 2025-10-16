@@ -16,8 +16,11 @@ categories = ["development-tools::debugging", "embedded", "no-std"]
 keywords = ["defmt", "embedded", "logging", "usb"]
 
 
-
 [dependencies]
+portable-atomic = { version = "1.11", features = [
+    "default",
+    "critical-section",
+] }
 
 [dependencies.critical-section]
 version = "*"
@@ -39,13 +42,12 @@ version = "0.4.0"
 version = "2"
 
 
-
 [features]
 
 default = ["buffersize-256"]
 
-buffersize-64   = []
-buffersize-128  = []
-buffersize-256  = []
-buffersize-512  = []
+buffersize-64 = []
+buffersize-128 = []
+buffersize-256 = []
+buffersize-512 = []
 buffersize-1024 = []

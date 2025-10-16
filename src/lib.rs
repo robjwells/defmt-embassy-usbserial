@@ -106,8 +106,6 @@ impl UsbEncoder {
     ///
     /// Must be called after calling `acquire` and before calling `release`.
     unsafe fn flush(&self) {
-        // SAFETY: Only called while the critical section is held.
-        #[allow(static_mut_refs)]
         controller::CONTROLLER.swap()
     }
 
@@ -122,11 +120,10 @@ impl UsbEncoder {
     }
 
     fn inner(bytes: &[u8]) {
+        // SAFETY: Always called from within a critical section by the defmt logger.
         unsafe {
-            // SAFETY: Called by Logger trait methods that ensure a critical section is held.
-            #[allow(static_mut_refs)]
-            controller::CONTROLLER.write(bytes)
-        };
+            controller::CONTROLLER.write(bytes);
+        }
     }
 }
 

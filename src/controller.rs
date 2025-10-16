@@ -1,88 +1,144 @@
 //! Logger buffers and the buffer controller
 
+use core::{cell::UnsafeCell, sync::atomic::Ordering};
+
+use portable_atomic::{AtomicBool, AtomicUsize};
+
 use crate::buffer::LogBuffer;
 
 /// The buffer controller of the logger.
-pub(super) static mut CONTROLLER: Controller = Controller::new();
+pub(super) static CONTROLLER: Controller = Controller::new();
 
 /// Controller of the buffers of the logger.
 pub struct Controller {
     /// Index of the currently active buffer.
-    current_idx: usize,
+    current_idx: AtomicUsize,
     /// The controller is enabled.
-    enabled: bool,
+    enabled: AtomicBool,
     /// Alternating buffers holding defmt frames.
-    buffers: [LogBuffer; 2],
+    //
+    // SAFETY: These are OK to be unsynchronised UnsafeCells because they are only written to from
+    // within a critical section, and taken out of use by that critical section (marked as
+    // flushing). They are only put back into use by the asynchronous logger task outside of the
+    // critical sections where writing occurs.
+    buffers: [UnsafeCell<LogBuffer>; 2],
 }
+
+// Sync is required for types in static variables.
+//
+// SAFETY: This is safe to implement because mutation of the LogBuffers only occurs within a
+// critical section, preventing concurrent modification.
+unsafe impl Sync for Controller {}
 
 impl Controller {
     /// Static initializer.
     pub const fn new() -> Self {
         Self {
-            current_idx: 0,
-            enabled: true,
-            buffers: [LogBuffer::new(), LogBuffer::new()],
+            current_idx: AtomicUsize::new(0),
+            enabled: AtomicBool::new(true),
+            buffers: [
+                UnsafeCell::new(LogBuffer::new()),
+                UnsafeCell::new(LogBuffer::new()),
+            ],
         }
     }
 
     /// Enables the controller.
     #[inline]
-    pub(super) fn enable(&mut self) {
-        self.enabled = true;
+    pub(super) fn enable(&self) {
+        self.enabled.store(true, Ordering::Relaxed);
     }
 
     /// Disables the controller.
     #[inline]
-    pub(super) fn disable(&mut self) {
-        self.enabled = false;
-    }
-
-    /// Get a mutable reference to the currently active buffer.
-    fn current_buffer(&mut self) -> &mut LogBuffer {
-        &mut self.buffers[self.current_idx]
+    pub(super) fn disable(&self) {
+        self.enabled.store(false, Ordering::Relaxed);
     }
 
     /// Mark the current buffer as flushing and set the other to be active.
-    pub(super) fn swap(&mut self) {
+    ///
+    /// # Safety
+    ///
+    /// Callers must ensure they are inside a critical section and there are no conflicting updates
+    /// made to the buffer index or the current buffer's state enum.
+    pub(super) unsafe fn swap(&self) {
         // Do nothing if not enabled.
-        if !self.enabled {
+        if !self.enabled.load(Ordering::Relaxed) {
             return;
         }
 
-        // Mark the current buffer as flushing.
-        self.current_buffer().flush();
+        let current_idx = self.current_idx.load(Ordering::Relaxed);
+
+        // SAFETY: We are OK to get a &mut to the current buffer because we are in a critical
+        // section, and it is held only for the purposes of changing the buffer's state enum,
+        // and in the critical section we only ever change the state to mark it as flushing.
+        unsafe {
+            let current = &mut *self.buffers[current_idx].get();
+            // Mark the current buffer as flushing.
+            current.flush();
+        }
 
         // 'Swap' the buffers by xor-ing the current index with 1.
-        self.current_idx ^= 1;
+        // This is the only place where current_idx is changed.
+        self.current_idx.store(current_idx ^ 1, Ordering::Relaxed);
     }
 
-    /// Writes to the current buffer.
+    /// Write defmt-encoded bytes to the current buffer.
+    ///
+    /// # Safety
+    ///
+    /// This writes to the underlying buffers, so the caller must ensure they are
+    /// inside a critical section.
     #[inline]
-    pub(super) fn write(&mut self, bytes: &[u8]) {
+    pub(super) unsafe fn write(&self, bytes: &[u8]) {
         // Do nothing if not enabled.
-        if !self.enabled {
+        if !self.enabled.load(Ordering::Relaxed) {
             return;
         }
 
+        let current_idx = self.current_idx.load(Ordering::Relaxed);
+        let other_idx = current_idx ^ 1;
+
+        // SAFETY: This function is only called while a critical section is held by the defmt
+        // logger, so we are OK to mutate the buffers. This is also the only place where the
+        // buffers' underlying store is changed.
+        let current = unsafe { &mut *(self.buffers[current_idx].get()) };
+        let other = unsafe { &mut *(self.buffers[other_idx].get()) };
         // If the current buffer accepts the necessary bytes, write to it.
-        if self.current_buffer().accepts(bytes.len()) {
+        if current.accepts(bytes.len()) {
             // Write to the buffer the data.
-            self.current_buffer().write(bytes);
+            current.write(bytes);
         } else {
             // If it doesn't accept the bytes, mark it as flushing and swap buffers.
+            // TODO: What if the alternate buffer _does not_ accept the bytes?
+            // TODO: Document safety of this.
             self.swap();
 
-            // TODO: What if the alternate buffer _does not_ accept the bytes?
-
-            // Attempt to write to the newly-active buffer.
-            if self.current_buffer().accepts(bytes.len()) {
+            if other.accepts(bytes.len()) {
                 // Write to the buffer the data.
-                self.current_buffer().write(bytes);
+                other.write(bytes);
             }
         }
     }
 
-    pub(super) fn get_flushing(&mut self) -> Option<&mut LogBuffer> {
-        self.buffers.iter_mut().find(|b| b.is_flushing())
+    pub(super) fn get_flushing(&self) -> Option<(usize, &LogBuffer)> {
+        for (idx, cell) in self.buffers.iter().enumerate() {
+            // SAFETY: swap, used in the defmt critical section, only ever marks a buffer as
+            // flushing (*never* as active), so if a buffer is marked as flushing it will not
+            // change until the caller of this function requests it to be reset.
+            let buf = unsafe { &*cell.get() };
+            if buf.is_flushing() {
+                return Some((idx, buf));
+            }
+        }
+        None
+    }
+
+    pub(crate) fn reset_buffer(&self, buf_idx: usize) {
+        // SAFETY: ????
+        unsafe {
+            let buf = &mut *self.buffers[buf_idx].get();
+            buf.reset();
+        };
     }
 }
