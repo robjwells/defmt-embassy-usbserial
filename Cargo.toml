@@ -17,10 +17,7 @@ keywords = ["defmt", "embedded", "logging", "usb"]
 
 
 [dependencies]
-portable-atomic = { version = "1.11", features = [
-    "default",
-    "critical-section",
-] }
+portable-atomic = { version = "1.11", features = ["default"] }
 
 [dependencies.critical-section]
 version = "*"
