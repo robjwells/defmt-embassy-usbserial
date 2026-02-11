@@ -3,9 +3,10 @@
 use embassy_time::{Duration, Timer};
 use embassy_usb::{
     Builder, Config,
-    class::cdc_acm::{CdcAcmClass, Sender, State},
+    class::cdc_acm::{CdcAcmClass, ControlChanged, Sender, State},
     driver::{Driver, EndpointError},
 };
+
 use static_cell::{ConstStaticCell, StaticCell};
 
 // TODO: Document the RAM usage of these buffers.
@@ -54,65 +55,47 @@ pub async fn run<D: Driver<'static>>(driver: D, config: Config<'static>) {
     let mut usb = builder.build();
 
     // Get the sender.
-    let (sender, _) = class.split();
+    let (sender, _, ctrl) = class.split_with_control();
 
     // Run both futures concurrently.
-    embassy_futures::join::join(usb.run(), logger(sender)).await;
+    embassy_futures::join::join(usb.run(), logger(sender, ctrl)).await;
 }
 
-/// USB logger task that writes full buffers out over USB.
-///
-/// When USB is connected, this enables the defmtusb controller and continuously attempts to flush
-/// any full buffer out over USB via `sender`.
-pub async fn logger<'d, D: Driver<'d>>(mut sender: Sender<'d, D>) {
+/// USB logger task that writes messages out over USB.
+pub async fn logger<'d, D: Driver<'d>>(mut sender: Sender<'d, D>, ctrl: ControlChanged<'d>) {
     // Get a reference to the controller.
-    let controller = &super::controller::CONTROLLER;
-    // Only attempt to write what the sender will accept.
-    let packet_size = sender.max_packet_size() as usize;
+    let mut consumer = super::controller::RING_BUFFER.consumer();
 
     'main: loop {
         // Wait for the device to be connected.
         sender.wait_connection().await;
 
-        // Set the controller as enabled.
-        controller.enable();
-
+        // If we don't wait for both DTR and RTS before sending data, we may send data before the
+        // host is ready to receive it, which will cause the host to drop the data.
         // Continually attempt to write buffered defmt bytes out over USB.
         loop {
-            let flush_res = controller
-                .flush::<_, EndpointError>(async |bytes| {
-                    let mut was_max_size = false;
-                    for chunk in bytes.chunks(packet_size) {
-                        was_max_size = chunk.len() == packet_size;
-                        sender.write_packet(chunk).await?;
-                    }
-                    // The Embassy CDC ACM docs note that a transfer must be terminated with a
-                    // shorter packet, so we track the size of the last chunk sent, and send a
-                    // zero-length packet if the chunk was the maximum packet size to ensure it is
-                    // processed by the host.
-                    if was_max_size {
-                        sender.write_packet(&[]).await?;
-                    }
-                    Ok(())
-                })
-                .await;
+            while !(sender.dtr() && sender.rts()) {
+                ctrl.control_changed().await;
+                Timer::after(Duration::from_millis(10)).await;
+            }
 
-            match flush_res {
+            // Wait for data to be available.
+            let readable = consumer.readable_bytes().await;
+            use embedded_io_async::Write;
+            match sender.write(&readable).await {
                 Err(EndpointError::Disabled) => {
-                    // USB endpoint is now disabled, so disable the controller (and so
-                    // not accept any defmt log messages) and wait until reconnected.
-                    controller.disable();
+                    // USB endpoint is now disabled. Wait for reconnection and
+                    // hope we're using rzcobs encoding.
                     continue 'main;
                 }
                 Err(EndpointError::BufferOverflow) => {
                     unreachable!("Sent chunks are limited to Sender max packet size.")
                 }
-                Ok(()) => (),
-            };
-
-            // Wait the timeout.
-            // TODO: Make this configurable.
-            Timer::after(Duration::from_millis(100)).await;
+                Ok(bytes_written) => {
+                    // Mark the bytes as consumed.
+                    readable.consume(bytes_written);
+                }
+            }
         }
     }
 }

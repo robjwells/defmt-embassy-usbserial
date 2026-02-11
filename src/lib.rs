@@ -101,23 +101,6 @@
 //! Note as well that ceasing to read from the serial port does not disable defmt logging; it seems
 //! that only disconnecting from USB will trigger the event that toggles the logger.
 //!
-//! ### High message latency
-//!
-//! It may take some time for you to start receiving messages, and they may come through in bursts.
-//! This is due to the implementation waiting until one of its internal buffers is full before
-//! writing to the USB serial port. This effect will be more pronounced if you choose a larger
-//! buffer size feature, and if you have messages with few (or no) formatting
-//! parameters, as this greatly reduces the size of the data that needs to be transferred.
-//!
-//! It may be possible to make the implementation aware of defmt messages, so that they come
-//! through in a more stream-like manner. Suggestions and contributions on this would be greatly
-//! appreciated.
-//!
-//! ### Buffers flushed only every 100ms
-//!
-//! Conversely, if you have a high volume of messages, there is at present a 100ms delay after
-//! writing an internal buffer to USB. It is planned to make this configurable.
-//!
 //! ## Acknowledgements
 //!
 //! Thank you to spcan, the original author of defmtusb. Thanks as well to the friendly and helpful
@@ -136,7 +119,6 @@
 
 #![no_std]
 
-mod buffer;
 mod controller;
 mod task;
 
@@ -240,7 +222,8 @@ impl UsbEncoder {
     ///
     /// Must be called after calling `acquire` and before calling `release`.
     unsafe fn flush(&self) {
-        unsafe { controller::CONTROLLER.swap() }
+        // Ideally this would block until everything has been written to the USB serial port.
+        // However, this is not possible in a synchronous context, so we do nothing.
     }
 
     /// Write bytes to the defmt encoder.

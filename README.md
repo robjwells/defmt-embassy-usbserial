@@ -62,9 +62,8 @@ On the host side, use [`defmt-print`] to decode and print the messages.
 (Note: This section has not yet been updated since the fork from micro-rust/defmtusb.)
 
 If you intend to create a variety of endpoints in the USB and use them, you can
-create them and then simply pass a CDC ACM `Sender` to the `logger` task in
-`defmtusb`. This method also requires the maximum packet size of the hardware
-USB implementation.
+create them and then simply pass a CDC ACM `Sender` and `ControlChanged` to the
+`logger` task in `defmtusb`.
 
 
 ```rust
@@ -80,10 +79,10 @@ async fn logger_wrapper(usb: USB) {
     let cdc = CdcAcmClass::new(&mut builder, &mut state, <max_packet_size>);
 
     // Split to get the sender only.
-    let sender = class.split();
+    let (sender, _rx, ctrl) = class.split_with_control();
 
     // Run only the logging function.
-    defmtusb::logger(sender, <max_packet_size>).await;
+    defmtusb::logger(sender, ctrl).await;
 }
 ```
 
