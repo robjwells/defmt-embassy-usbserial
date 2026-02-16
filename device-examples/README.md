@@ -7,3 +7,4 @@ examples are known to work on those chips.
 
 - `embassy-rp`: both RP2040 and RP235x
 - `esp-hal`: ESP32-S2
+- `embassy-nrf`: nRF52840
